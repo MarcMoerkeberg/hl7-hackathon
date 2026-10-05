@@ -2,6 +2,7 @@
   <Folder Name="/Libraries/">
     <Project Path="Libraries/Hl7Hackathon.Core/Hl7Hackathon.Core.csproj" />
     <Project Path="Libraries/Hl7Hackathon.Fhir/Hl7Hackathon.Fhir.csproj" />
+    <Project Path="Libraries/Hl7Hackathon.Framework/Hl7Hackathon.Framework.csproj" />
     <Project Path="Libraries/Hl7Hackathon.Services/Hl7Hackathon.Services.csproj" />
   </Folder>
 </Solution>

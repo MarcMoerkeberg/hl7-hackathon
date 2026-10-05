@@ -9,4 +9,7 @@
     <Project Path="Presentation/Hl7Hackathon.AppHost/Hl7Hackathon.AppHost.csproj" />
     <Project Path="Presentation/Hl7Hackathon.Web/Hl7Hackathon.Web.csproj" />
   </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/Hl7Hackathon.TestHelpers/Hl7Hackathon.TestHelpers.csproj" />
+  </Folder>
 </Solution>

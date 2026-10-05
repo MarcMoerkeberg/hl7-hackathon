@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Hl7Hackathon.Core\Hl7Hackathon.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hl7Hackathon.UnitTests" />
+  </ItemGroup>
+
+</Project>

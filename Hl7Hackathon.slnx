@@ -6,6 +6,7 @@
     <Project Path="Libraries/Hl7Hackathon.Services/Hl7Hackathon.Services.csproj" />
   </Folder>
   <Folder Name="/Presentation/">
+    <Project Path="Presentation/Hl7Hackathon.AppHost/Hl7Hackathon.AppHost.csproj" />
     <Project Path="Presentation/Hl7Hackathon.Web/Hl7Hackathon.Web.csproj" />
   </Folder>
 </Solution>

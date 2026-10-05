@@ -1,0 +1,22 @@
+# Fallback when not running through the Aspire AppHost: `docker compose up -d`
+# Add `--profile fhir` to also start a local HAPI FHIR server on http://localhost:8080/fhir.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hl7hackathon
+      POSTGRES_PASSWORD: hl7hackathon
+      POSTGRES_DB: hl7hackathon
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  hapi-fhir:
+    image: hapiproject/hapi:latest
+    profiles: ["fhir"]
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:

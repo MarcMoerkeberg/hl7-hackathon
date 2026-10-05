@@ -1,0 +1,18 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.5.4">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>6f0c1a52-3b8e-4d7a-9f64-2c1e5b7d8a90</UserSecretsId>
+    <!-- Dashboard and orchestrator come from NuGet packages, so no separate Aspire CLI install is needed. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Hl7Hackathon.Web\Hl7Hackathon.Web.csproj" />
+  </ItemGroup>
+
+</Project>

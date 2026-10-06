@@ -1,0 +1,189 @@
+@using Hl7Hackathon.Core.Models.Domain
+@using Hl7Hackathon.Web.Common
+@inject IEpisodeOfCareFactory EpisodeOfCareFactory
+@inject IPatientFactory PatientFactory
+
+@if (_patientsResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error">@_patientsResult.Error.Message</MudAlert>
+}
+else
+{
+    <MudGrid>
+        <MudItem xs="12">
+            <MudAutocomplete T="PatientModel"
+                             Value="_patient"
+                             ValueChanged="PatientChangedAsync"
+                             SearchFunc="SearchPatientsAsync"
+                             ToStringFunc="ToPatientName"
+                             Label="Patient"
+                             Placeholder="Name or CPR number"
+                             Variant="Variant.Outlined"
+                             Disabled="_patientsResult is null"
+                             Required
+                             Clearable
+                             OpenOnFocus
+                             ResetValueOnEmptyText
+                             MaxItems="null" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect T="EpisodeOfCareStatusModel"
+                       Value="_status"
+                       ValueChanged="StatusChangedAsync"
+                       Label="Status"
+                       Variant="Variant.Outlined"
+                       Required>
+                @foreach (var status in Enum.GetValues<EpisodeOfCareStatusModel>())
+                {
+                    <MudSelectItem T="EpisodeOfCareStatusModel" Value="@status">@status</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudDatePicker Date="_start"
+                           DateChanged="StartChangedAsync"
+                           DateFormat="@DisplayFormat.DatePattern"
+                           Label="Start"
+                           Variant="Variant.Outlined"
+                           Required />
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudDatePicker Date="_end"
+                           DateChanged="EndChangedAsync"
+                           DateFormat="@DisplayFormat.DatePattern"
+                           Label="End"
+                           Variant="Variant.Outlined"
+                           Error="IsPeriodInverted"
+                           ErrorText="The end cannot be before the start."
+                           HelperText="Optional"
+                           Clearable />
+        </MudItem>
+    </MudGrid>
+}
+
+@if (_createResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4" Style="white-space: pre-line">@_createResult.Error.Message</MudAlert>
+}
+
+@code {
+    private const EpisodeOfCareStatusModel DefaultStatus = EpisodeOfCareStatusModel.Active;
+
+    /// <summary>Raised with the created episode of care; the host decides what to show or close.</summary>
+    [Parameter]
+    public EventCallback<EpisodeOfCareModel> OnCreated { get; set; }
+
+    /// <summary>
+    /// Raised whenever <see cref="CanCreate"/> changes, so a host that owns the submit button can re-render it.
+    /// </summary>
+    [Parameter]
+    public EventCallback<bool> CanCreateChanged { get; set; }
+
+    private Result<IReadOnlyList<PatientModel>>? _patientsResult;
+    private Result<EpisodeOfCareModel>? _createResult;
+    private PatientModel? _patient;
+    private EpisodeOfCareStatusModel _status = DefaultStatus;
+    private DateTime? _start = DateTime.Today;
+    private DateTime? _end;
+    private DateTime _defaultStart = DateTime.Today;
+    private bool _creating;
+
+    /// <summary>Whether the form holds everything an episode of care needs.</summary>
+    public bool CanCreate => !_creating && _patient is not null && _start is not null && !IsPeriodInverted;
+
+    /// <summary>Whether the period ends before it starts, which the date pickers flag inline.</summary>
+    private bool IsPeriodInverted => _start is { } start && _end is { } end && end < start;
+
+    /// <summary>Whether the user has entered anything they would lose by closing the form.</summary>
+    public bool IsDirty => _patient is not null || _status != DefaultStatus || _start != _defaultStart || _end is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Captured so a form left open past midnight does not count its own default as a change.
+        _defaultStart = DateTime.Today;
+        _start = _defaultStart;
+
+        _patientsResult = await PatientFactory.GetPatientsAsync();
+    }
+
+    /// <summary>
+    /// Creates the episode of care from what the form holds. Does nothing unless <see cref="CanCreate"/>.
+    /// </summary>
+    public async Task SubmitAsync()
+    {
+        if (_patient is null || _start is null)
+        {
+            return;
+        }
+
+        _creating = true;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+
+        _createResult = await EpisodeOfCareFactory.CreateEpisodeOfCareAsync(new CreateEpisodeOfCareModel
+        {
+            PatientId = _patient.Id,
+            Status = _status,
+            Start = ToStartOfDay(_start.Value),
+            // A FHIR period includes its end, so a picked end date covers that whole day.
+            End = _end is { } end ? ToStartOfDay(end.AddDays(1)).AddSeconds(-1) : null
+        });
+
+        _creating = false;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+
+        if (_createResult is { IsSuccess: true })
+        {
+            await OnCreated.InvokeAsync(_createResult.Value);
+        }
+    }
+
+    private Task<IEnumerable<PatientModel>> SearchPatientsAsync(string? value, CancellationToken cancellationToken)
+    {
+        var patients = _patientsResult is { IsSuccess: true } ? _patientsResult.Value : [];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Task.FromResult<IEnumerable<PatientModel>>(patients);
+        }
+
+        // Matches what the list shows, so typing either a name or a CPR number narrows it.
+        var matches = patients
+            .Where(patient => ToPatientName(patient).Contains(value.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Task.FromResult<IEnumerable<PatientModel>>(matches);
+    }
+
+    private static string ToPatientName(PatientModel? patient)
+    {
+        return patient is null
+            ? string.Empty
+            : $"{patient.GivenName} {patient.FamilyName} ({DisplayFormat.Cpr(patient.Cpr)})";
+    }
+
+    private async Task PatientChangedAsync(PatientModel? patient)
+    {
+        _patient = patient;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task StatusChangedAsync(EpisodeOfCareStatusModel status)
+    {
+        _status = status;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task StartChangedAsync(DateTime? start)
+    {
+        _start = start;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task EndChangedAsync(DateTime? end)
+    {
+        _end = end;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    // The picker has no time zone, so the date is read as Danish local time and sent with that offset.
+    private static DateTimeOffset ToStartOfDay(DateTime date) => new(date.Date, TimeZoneInfo.Local.GetUtcOffset(date));
+}

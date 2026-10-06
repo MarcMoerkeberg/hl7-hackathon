@@ -3,6 +3,7 @@ using Hl7Hackathon.Fhir.Codes;
 using Hl7Hackathon.Fhir.Common;
 using Hl7Hackathon.Fhir.Models;
 using Hl7Hackathon.Fhir.Models.Bundles;
+using Hl7Hackathon.Fhir.Models.Questionnaires;
 using Hl7Hackathon.TestHelpers;
 
 namespace Hl7Hackathon.UnitTests.Fhir;
@@ -142,6 +143,38 @@ public class FhirJsonSerializerTests
         // Act & Assert
         var exception = Assert.Throws<JsonException>(() => FhirJsonSerializer.Deserialize(json));
         Assert.Contains("'Final' is not a code in ObservationStatus", exception.Message);
+    }
+
+    [Fact]
+    public void Deserialize_ReadsAQuestionnaire_WhenAnotherSystemLeftOutElementsR4Requires()
+    {
+        // Arrange
+        // A shared server holds other people's questionnaires; one of them missing status, item.linkId or item.type
+        // must not fail the whole search.
+        const string json = """
+            {
+              "resourceType": "Bundle",
+              "type": "searchset",
+              "entry": [
+                {
+                  "resource": {
+                    "resourceType": "Questionnaire",
+                    "id": "someone-elses",
+                    "item": [ { "text": "A question with no linkId or type" } ]
+                  }
+                }
+              ]
+            }
+            """;
+
+        // Act
+        var bundle = FhirJsonSerializer.Deserialize<Bundle>(json);
+
+        // Assert
+        var questionnaire = Assert.IsType<Questionnaire>(Assert.Single(bundle.Entry!).Resource);
+        Assert.Equal("someone-elses", questionnaire.Id);
+        Assert.Null(questionnaire.Status);
+        Assert.Null(Assert.Single(questionnaire.Item!).LinkId);
     }
 
     [Fact]

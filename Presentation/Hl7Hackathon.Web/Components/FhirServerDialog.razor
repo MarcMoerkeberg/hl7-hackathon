@@ -1,0 +1,57 @@
+@using Hl7Hackathon.Core.Models.Domain
+@inject IFhirServerFactory FhirServerFactory
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-4">
+            Every resource this app creates or searches goes to this server.
+        </MudText>
+
+        @if (_checking)
+        {
+            <MudProgressLinear Indeterminate Class="my-4" />
+        }
+        else if (_serverResult is { IsFailure: true })
+        {
+            <MudAlert Severity="Severity.Error" Style="white-space: pre-line">@_serverResult.Error.Message</MudAlert>
+        }
+        else if (_serverResult is { IsSuccess: true } && _serverResult.Value is { } server)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-4">The server answered.</MudAlert>
+            <MudSimpleTable Dense>
+                <tbody>
+                    <tr><td>Name</td><td>@server.Name</td></tr>
+                    <tr><td>Base URL</td><td>@server.BaseUrl</td></tr>
+                    <tr><td>Software</td><td>@server.SoftwareName @server.SoftwareVersion</td></tr>
+                    <tr><td>FHIR version</td><td>@server.FhirVersion</td></tr>
+                    <tr><td>Resource types</td><td>@server.SupportedResourceTypes.Count</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_checking" OnClick="CheckAsync">
+            Check connection
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private Result<FhirServerInfoModel>? _serverResult;
+    private bool _checking;
+
+    protected override async Task OnInitializedAsync() => await CheckAsync();
+
+    private void Close() => MudDialog.Close();
+
+    private async Task CheckAsync()
+    {
+        _checking = true;
+        _serverResult = await FhirServerFactory.GetFhirServerInfoAsync();
+        _checking = false;
+    }
+}

@@ -6,7 +6,7 @@ namespace Hl7Hackathon.Fhir.Models.Questionnaires;
 /// <remarks>
 /// Contract: <see href="https://hl7.dk/fhir/hackathons/StructureDefinition-TelemedicineQuestionnaire.html">TelemedicineQuestionnaire</see>,
 /// based on <see href="https://hl7.org/fhir/R4/questionnaire.html">Questionnaire (R4)</see>. We only read
-/// questionnaires from the server, so the model has no validation beyond the base cardinalities.
+/// questionnaires from the server, and from servers we share with others, so nothing here is required.
 /// </remarks>
 public sealed record Questionnaire : DomainResource
 {
@@ -18,7 +18,11 @@ public sealed record Questionnaire : DomainResource
     public string? Title { get; init; }
 
     /// <summary>draft | active | retired | unknown</summary>
-    public required string Status { get; init; }
+    /// <remarks>
+    /// 1..1 in R4, but not <c>required</c>: a shared server holds other people's questionnaires, and one of them
+    /// missing a status would otherwise fail the whole search instead of just that entry.
+    /// </remarks>
+    public string? Status { get; init; }
 
     /// <summary>Questions and sections within the Questionnaire.</summary>
     public IReadOnlyList<QuestionnaireItem>? Item { get; init; }

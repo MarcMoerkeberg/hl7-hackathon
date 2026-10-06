@@ -1,0 +1,115 @@
+@using Hl7Hackathon.Core.Models.Domain
+@using Hl7Hackathon.Web.Common
+@inject IPatientFactory PatientFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+@if (_patientsResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error">@_patientsResult.Error.Message</MudAlert>
+}
+else
+{
+    <MudDataGrid T="PatientModel"
+                 Items="_patientsResult?.Value ?? []"
+                 Loading="_patientsResult is null"
+                 Elevation="0"
+                 Dense
+                 Hover
+                 SortMode="SortMode.Single"
+                 ColumnResizeMode="ResizeMode.Column">
+        <ToolBarContent>
+            <MudText Typo="Typo.h6">Patients (local database)</MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="OpenCreateEpisodeOfCareAsync">
+                Nyt medicinsk forløb
+            </MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Secondary"
+                       Class="ml-2"
+                       StartIcon="@Icons.Material.Filled.MonitorHeart"
+                       OnClick="OpenCreateObservationAsync">
+                Ny observation
+            </MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Tertiary"
+                       Class="ml-2"
+                       StartIcon="@Icons.Material.Filled.Assignment"
+                       OnClick="OpenCreateQuestionnaireResponseAsync">
+                Nyt spørgeskema
+            </MudButton>
+        </ToolBarContent>
+        <Columns>
+            <PropertyColumn Property="patient => patient.Id" Title="P-ID" />
+            <PropertyColumn Property="patient => patient.Cpr" Title="CPR">
+                <CellTemplate>@DisplayFormat.Cpr(context.Item.Cpr)</CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="patient => patient.FamilyName" Title="Name">
+                <CellTemplate>@context.Item.GivenName @context.Item.FamilyName</CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="patient => patient.Gender" Title="Gender" />
+            <PropertyColumn Property="patient => patient.BirthDate" Title="Birth date">
+                <CellTemplate>@DisplayFormat.Date(context.Item.BirthDate)</CellTemplate>
+            </PropertyColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText>No patients. Set SeedDatabase to true to seed fictitious patients.</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+}
+
+@code {
+    // Both form dialogs guard against losing what was entered, so every way out goes through their own Cancel.
+    private static readonly DialogOptions _formDialogOptions = new()
+    {
+        CloseButton = false,
+        BackdropClick = false,
+        CloseOnEscapeKey = false,
+        DefaultFocus = DefaultFocus.Element,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true
+    };
+
+    private Result<IReadOnlyList<PatientModel>>? _patientsResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _patientsResult = await PatientFactory.GetPatientsAsync();
+    }
+
+    private async Task OpenCreateEpisodeOfCareAsync()
+    {
+        var dialog = await DialogService.ShowAsync<CreateEpisodeOfCareDialog>("Nyt medicinsk forløb", _formDialogOptions);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: EpisodeOfCareModel episodeOfCare })
+        {
+            Snackbar.Add($"Episode of care {episodeOfCare.Id} was created.", Severity.Success);
+        }
+    }
+
+    private async Task OpenCreateObservationAsync()
+    {
+        var dialog = await DialogService.ShowAsync<CreateObservationDialog>("Ny observation", _formDialogOptions);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: ObservationModel observation })
+        {
+            Snackbar.Add($"Observation {observation.Id} was created.", Severity.Success);
+        }
+    }
+
+    private async Task OpenCreateQuestionnaireResponseAsync()
+    {
+        var dialog = await DialogService.ShowAsync<CreateQuestionnaireResponseDialog>("Nyt spørgeskema", _formDialogOptions);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: QuestionnaireResponseModel response })
+        {
+            Snackbar.Add($"Questionnaire response {response.Id} was created.", Severity.Success);
+        }
+    }
+}

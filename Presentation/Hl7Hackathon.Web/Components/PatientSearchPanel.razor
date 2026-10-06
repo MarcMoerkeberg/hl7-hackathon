@@ -1,0 +1,109 @@
+@using Hl7Hackathon.Core.Models.Domain
+@using Hl7Hackathon.Web.Common
+@inject IPatientFactory PatientFactory
+
+<MudText Typo="Typo.h6">Search patients</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Searches the FHIR server. A CPR number is matched as the DK Core identifier, a name against any part of
+    any of the patient's names.
+</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudTextField @bind-Value="_cpr"
+                      Label="CPR number"
+                      Placeholder="251248-9996"
+                      Variant="Variant.Outlined"
+                      Immediate
+                      OnKeyUp="SearchOnEnterAsync" />
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudTextField @bind-Value="_name"
+                      Label="Name"
+                      Variant="Variant.Outlined"
+                      Immediate
+                      OnKeyUp="SearchOnEnterAsync" />
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudDatePicker @bind-Date="_birthDate"
+                       DateFormat="@DisplayFormat.DatePattern"
+                       Label="Date of birth"
+                       Variant="Variant.Outlined"
+                       Clearable />
+    </MudItem>
+</MudGrid>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-4" Disabled="_searching" OnClick="SearchAsync">
+    Search
+</MudButton>
+
+@if (_searching)
+{
+    <MudProgressLinear Indeterminate Class="my-4" />
+}
+else if (_searchResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4" Style="white-space: pre-line">@_searchResult.Error.Message</MudAlert>
+}
+else if (_searchResult is { IsSuccess: true } && _searchResult.Value is { } matches)
+{
+    <MudText Typo="Typo.body2" Class="mt-4">
+        Showing @matches.Patients.Count of @(matches.Total?.ToString() ?? "an unknown number of") matches.
+    </MudText>
+    <MudTable Items="matches.Patients" Dense Hover Class="mt-2">
+        <HeaderContent>
+            <MudTh>Id</MudTh>
+            <MudTh>CPR</MudTh>
+            <MudTh>Name</MudTh>
+            <MudTh>Gender</MudTh>
+            <MudTh>Birth date</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Id</MudTd>
+            <MudTd>@(DisplayFormat.Cpr(context.Cpr) ?? Missing)</MudTd>
+            <MudTd>@ToName(context)</MudTd>
+            <MudTd>@(context.Gender ?? Missing)</MudTd>
+            <MudTd>@(DisplayFormat.FhirDate(context.BirthDate) ?? Missing)</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No patients on the server matched.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    private const string Missing = "—";
+
+    private Result<PatientSearchResultModel>? _searchResult;
+    private string? _cpr;
+    private string? _name;
+    private DateTime? _birthDate;
+    private bool _searching;
+
+    private static string ToName(FhirPatientModel patient)
+    {
+        var name = $"{patient.GivenName} {patient.FamilyName}".Trim();
+
+        return name.Length == 0 ? Missing : name;
+    }
+
+    private async Task SearchOnEnterAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        _searching = true;
+        _searchResult = await PatientFactory.SearchPatientsAsync(new SearchPatientsModel
+        {
+            Cpr = _cpr,
+            Name = _name,
+            BirthDate = _birthDate is { } birthDate ? DateOnly.FromDateTime(birthDate) : null
+        });
+        _searching = false;
+    }
+}

@@ -1,0 +1,115 @@
+@using Hl7Hackathon.Core.Models.Domain
+@using MudBlazor.Services
+@implements IAsyncDisposable
+@inject IDialogService DialogService
+@inject IKeyInterceptorService KeyInterceptorService
+
+<MudDialog>
+    <DialogContent>
+        @* A strip that is always present, so starting a submit does not change the dialog's height. *@
+        <div style="height: 4px">
+            @if (_submitting)
+            {
+                <MudProgressLinear Indeterminate />
+            }
+        </div>
+        <CreateEpisodeOfCareForm @ref="_form" OnCreated="CloseAsync" CanCreateChanged="OnCanCreateChanged" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="TryCancelAsync">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="!_canCreate" OnClick="CreateAsync">
+            Opret
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private CreateEpisodeOfCareForm? _form;
+    private bool _canCreate;
+    private bool _submitting;
+    private bool _subscribed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Escape is intercepted on the dialog container, because a dialog shown through IDialogService never
+        // receives MudDialog.OnKeyDown and the focus sits on the container rather than on this content.
+        if (firstRender)
+        {
+            await KeyInterceptorService.SubscribeAsync(
+                MudDialog.ElementId,
+                new KeyInterceptorOptions([new KeyOptions { Key = "Escape", SubscribeDown = true, PreventDown = "key+none" }]),
+                KeyObserver.KeyDown(OnKeyDownAsync),
+                KeyObserver.KeyUpIgnore());
+
+            _subscribed = true;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_subscribed)
+        {
+            await KeyInterceptorService.UnsubscribeAsync(MudDialog.ElementId);
+        }
+    }
+
+    private void OnCanCreateChanged(bool canCreate) => _canCreate = canCreate;
+
+    private async Task CreateAsync()
+    {
+        if (_form is null)
+        {
+            return;
+        }
+
+        _submitting = true;
+
+        try
+        {
+            await _form.SubmitAsync();
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private Task CloseAsync(EpisodeOfCareModel episodeOfCare)
+    {
+        MudDialog.Close(DialogResult.Ok(episodeOfCare));
+
+        return Task.CompletedTask;
+    }
+
+    // The interceptor calls back from JavaScript, so the work goes onto the component's dispatcher.
+    private Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        return args.Key == "Escape"
+            ? InvokeAsync(TryCancelAsync)
+            : Task.CompletedTask;
+    }
+
+    private async Task TryCancelAsync()
+    {
+        if (_form?.IsDirty == true && !await ConfirmDiscardAsync())
+        {
+            return;
+        }
+
+        MudDialog.Cancel();
+    }
+
+    private async Task<bool> ConfirmDiscardAsync()
+    {
+        var discard = await DialogService.ShowMessageBoxAsync(
+            "Discard the episode of care?",
+            "The episode of care has not been sent to the FHIR server. Closing now loses what you entered.",
+            yesText: "Discard",
+            cancelText: "Keep editing");
+
+        return discard == true;
+    }
+}

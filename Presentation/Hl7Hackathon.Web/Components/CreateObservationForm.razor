@@ -1,0 +1,332 @@
+@using Hl7Hackathon.Core.Models.Domain
+@using Hl7Hackathon.Web.Common
+@inject IObservationFactory ObservationFactory
+@inject IEpisodeOfCareFactory EpisodeOfCareFactory
+@inject IPatientFactory PatientFactory
+
+@if (_patientsResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error">@_patientsResult.Error.Message</MudAlert>
+}
+else
+{
+    <MudGrid>
+        <MudItem xs="12">
+            <MudAutocomplete T="PatientModel"
+                             Value="_patient"
+                             ValueChanged="PatientChangedAsync"
+                             SearchFunc="SearchPatientsAsync"
+                             ToStringFunc="ToPatientName"
+                             Label="Patient"
+                             Placeholder="Name or CPR number"
+                             Variant="Variant.Outlined"
+                             Disabled="_patientsResult is null"
+                             Required
+                             Clearable
+                             OpenOnFocus
+                             ResetValueOnEmptyText
+                             MaxItems="null" />
+        </MudItem>
+
+        @* Every state of the episode lookup goes in the helper slot, so the dialog never changes height. *@
+        <MudItem xs="12">
+            <MudSelect T="EpisodeOfCareModel"
+                       Value="_episodeOfCare"
+                       ValueChanged="EpisodeOfCareChangedAsync"
+                       Label="Medicinsk forløb"
+                       Variant="Variant.Outlined"
+                       Disabled="_patient is null || _loadingEpisodes"
+                       Required
+                       Error="EpisodeOfCareError is not null"
+                       ErrorText="@EpisodeOfCareError"
+                       ToStringFunc="ToEpisodeOfCareName"
+                       HelperText="@EpisodeOfCareHelperText">
+                @foreach (var episodeOfCare in EpisodesOfCare)
+                {
+                    <MudSelectItem T="EpisodeOfCareModel" Value="@episodeOfCare">@ToEpisodeOfCareName(episodeOfCare)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudSelect T="ObservationKindModel"
+                       Value="_kind"
+                       ValueChanged="KindChangedAsync"
+                       Label="Measurement"
+                       Variant="Variant.Outlined"
+                       Required>
+                @foreach (var kind in Enum.GetValues<ObservationKindModel>())
+                {
+                    <MudSelectItem T="ObservationKindModel" Value="@kind">@ToKindName(kind)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudSelect T="string"
+                       Value="_activityCode"
+                       ValueChanged="ActivityCodeChangedAsync"
+                       Label="Activity"
+                       Variant="Variant.Outlined"
+                       Disabled="!IsPhysicalActivity"
+                       Required="IsPhysicalActivity"
+                       ToStringFunc="ToActivityName">
+                @foreach (var activity in _activityCodes)
+                {
+                    <MudSelectItem T="string" Value="@activity.Code">@activity.Display</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudNumericField T="decimal?"
+                             Value="_value"
+                             ValueChanged="ValueChangedAsync"
+                             Label="@ValueLabel"
+                             Variant="Variant.Outlined"
+                             Min="0"
+                             Required="!IsPhysicalActivity" />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudDatePicker Date="_start"
+                           DateChanged="StartChangedAsync"
+                           DateFormat="@DisplayFormat.DatePattern"
+                           Label="Start"
+                           Variant="Variant.Outlined"
+                           Required />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudDatePicker Date="_end"
+                           DateChanged="EndChangedAsync"
+                           DateFormat="@DisplayFormat.DatePattern"
+                           Label="End"
+                           Variant="Variant.Outlined"
+                           Required
+                           Error="IsPeriodInverted"
+                           ErrorText="Ends before it starts"
+                           HelperText="Midnight to midnight" />
+        </MudItem>
+    </MudGrid>
+}
+
+@if (_createResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4" Style="white-space: pre-line">@_createResult.Error.Message</MudAlert>
+}
+
+@code {
+    private const ObservationKindModel DefaultKind = ObservationKindModel.Sleep;
+
+    /// <summary>Raised with the created observation; the host decides what to show or close.</summary>
+    [Parameter]
+    public EventCallback<ObservationModel> OnCreated { get; set; }
+
+    /// <summary>
+    /// Raised whenever <see cref="CanCreate"/> changes, so a host that owns the submit button can re-render it.
+    /// </summary>
+    [Parameter]
+    public EventCallback<bool> CanCreateChanged { get; set; }
+
+    private IReadOnlyList<ActivityCodeModel> _activityCodes = [];
+    private Result<IReadOnlyList<PatientModel>>? _patientsResult;
+    private Result<IReadOnlyList<EpisodeOfCareModel>>? _episodesResult;
+    private Result<ObservationModel>? _createResult;
+    private PatientModel? _patient;
+    private EpisodeOfCareModel? _episodeOfCare;
+    private ObservationKindModel _kind = DefaultKind;
+    private string? _activityCode;
+    private decimal? _value;
+    private DateTime? _start = DateTime.Today;
+    private DateTime? _end = DateTime.Today.AddDays(1);
+    private DateTime _defaultStart = DateTime.Today;
+    private DateTime _defaultEnd = DateTime.Today.AddDays(1);
+    private bool _loadingEpisodes;
+    private bool _creating;
+
+    /// <summary>Whether the form holds everything the chosen kind of observation needs.</summary>
+    public bool CanCreate => !_creating
+        && _episodeOfCare is not null
+        && _start is not null
+        && _end is not null
+        && !IsPeriodInverted
+        && (IsPhysicalActivity ? _activityCode is not null : _value is not null);
+
+    /// <summary>Whether the user has entered anything they would lose by closing the form.</summary>
+    public bool IsDirty => _patient is not null
+        || _episodeOfCare is not null
+        || _kind != DefaultKind
+        || _activityCode is not null
+        || _value is not null
+        || _start != _defaultStart
+        || _end != _defaultEnd;
+
+    private bool IsPhysicalActivity => _kind == ObservationKindModel.PhysicalActivity;
+
+    /// <summary>Whether the period ends before it starts, which the date pickers flag inline.</summary>
+    private bool IsPeriodInverted => _start is { } start && _end is { } end && end < start;
+
+    private IReadOnlyList<EpisodeOfCareModel> EpisodesOfCare =>
+        _episodesResult is { IsSuccess: true } ? _episodesResult.Value : [];
+
+    private string ValueLabel => IsPhysicalActivity ? "Minutes" : "Hours";
+
+    private string EpisodeOfCareHelperText => _loadingEpisodes
+        ? "Looking up the patient's forløb…"
+        : _patient is null
+        ? "Select a patient first"
+        : "The forløb this measurement belongs to";
+
+    /// <summary>
+    /// Why no forløb can be chosen, or <see langword="null"/> when the lookup is fine.
+    /// </summary>
+    /// <remarks>Kept to one line where possible, so showing it does not resize the dialog.</remarks>
+    private string? EpisodeOfCareError
+    {
+        get
+        {
+            if (_episodesResult is { IsFailure: true })
+            {
+                return _episodesResult.Error.Message;
+            }
+
+            return _patient is not null && _episodesResult is { IsSuccess: true } && _episodesResult.Value.Count == 0
+                ? "No medicinsk forløb on the server yet — create one first"
+                : null;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Captured so a form left open past midnight does not count its own defaults as changes.
+        _defaultStart = DateTime.Today;
+        _defaultEnd = _defaultStart.AddDays(1);
+        _start = _defaultStart;
+        _end = _defaultEnd;
+
+        _activityCodes = ObservationFactory.GetActivityCodes();
+        _patientsResult = await PatientFactory.GetPatientsAsync();
+    }
+
+    /// <summary>
+    /// Reports the observation. Does nothing unless <see cref="CanCreate"/>.
+    /// </summary>
+    public async Task SubmitAsync()
+    {
+        if (_episodeOfCare is null || _start is null || _end is null)
+        {
+            return;
+        }
+
+        _creating = true;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+
+        _createResult = await ObservationFactory.CreateObservationAsync(new CreateObservationModel
+        {
+            EpisodeOfCareId = _episodeOfCare.Id,
+            Kind = _kind,
+            Start = ToStartOfDay(_start.Value),
+            End = ToStartOfDay(_end.Value),
+            Value = _value,
+            ActivityCode = IsPhysicalActivity ? _activityCode : null
+        });
+
+        _creating = false;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+
+        if (_createResult is { IsSuccess: true })
+        {
+            await OnCreated.InvokeAsync(_createResult.Value);
+        }
+    }
+
+    private Task<IEnumerable<PatientModel>> SearchPatientsAsync(string? value, CancellationToken cancellationToken)
+    {
+        var patients = _patientsResult is { IsSuccess: true } ? _patientsResult.Value : [];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Task.FromResult<IEnumerable<PatientModel>>(patients);
+        }
+
+        var matches = patients
+            .Where(patient => ToPatientName(patient).Contains(value.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Task.FromResult<IEnumerable<PatientModel>>(matches);
+    }
+
+    private static string ToPatientName(PatientModel? patient)
+    {
+        return patient is null
+            ? string.Empty
+            : $"{patient.GivenName} {patient.FamilyName} ({DisplayFormat.Cpr(patient.Cpr)})";
+    }
+
+    private static string ToEpisodeOfCareName(EpisodeOfCareModel? episodeOfCare)
+    {
+        return episodeOfCare is null
+            ? string.Empty
+            : $"{episodeOfCare.Id} · {episodeOfCare.Status} · from {DisplayFormat.FhirDateTime(episodeOfCare.Start)}";
+    }
+
+    private static string ToKindName(ObservationKindModel kind) =>
+        kind == ObservationKindModel.Sleep ? "Sleep" : "Physical activity";
+
+    private string ToActivityName(string? code) =>
+        _activityCodes.FirstOrDefault(activity => activity.Code == code)?.Display ?? string.Empty;
+
+    private async Task PatientChangedAsync(PatientModel? patient)
+    {
+        _patient = patient;
+        _episodeOfCare = null;
+        _episodesResult = null;
+
+        if (patient is not null)
+        {
+            _loadingEpisodes = true;
+            await CanCreateChanged.InvokeAsync(CanCreate);
+
+            _episodesResult = await EpisodeOfCareFactory.GetEpisodesOfCareForPatientAsync(patient.Id);
+            _loadingEpisodes = false;
+        }
+
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task EpisodeOfCareChangedAsync(EpisodeOfCareModel? episodeOfCare)
+    {
+        _episodeOfCare = episodeOfCare;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task KindChangedAsync(ObservationKindModel kind)
+    {
+        _kind = kind;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task ActivityCodeChangedAsync(string? activityCode)
+    {
+        _activityCode = activityCode;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task ValueChangedAsync(decimal? value)
+    {
+        _value = value;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task StartChangedAsync(DateTime? start)
+    {
+        _start = start;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task EndChangedAsync(DateTime? end)
+    {
+        _end = end;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    // The picker has no time zone, so the date is read as Danish local time and sent with that offset.
+    private static DateTimeOffset ToStartOfDay(DateTime date) => new(date.Date, TimeZoneInfo.Local.GetUtcOffset(date));
+}

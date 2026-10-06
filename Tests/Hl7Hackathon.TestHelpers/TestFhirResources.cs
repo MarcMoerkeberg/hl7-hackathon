@@ -3,6 +3,7 @@ using Hl7Hackathon.Fhir.Common;
 using Hl7Hackathon.Fhir.Models;
 using Hl7Hackathon.Fhir.Models.DataTypes;
 using Hl7Hackathon.Fhir.Models.QuestionnaireResponses;
+using Hl7Hackathon.Fhir.Models.Questionnaires;
 
 namespace Hl7Hackathon.TestHelpers;
 
@@ -11,7 +12,7 @@ namespace Hl7Hackathon.TestHelpers;
 /// </summary>
 public static class TestFhirResources
 {
-    public const string CprSystem = "urn:oid:1.2.208.176.1.2";
+    public const string CprSystem = DkCore.CprSystem;
     public const string PatientReference = "Patient/1";
     public const string EpisodeOfCareReference = "EpisodeOfCare/1";
 
@@ -58,6 +59,61 @@ public static class TestFhirResources
         Performer = [new ResourceReference { Reference = patientReference }],
         EffectivePeriod = new Period { Start = "2026-10-05T12:00:00+02:00", End = "2026-10-06T12:00:00+02:00" },
         ValueQuantity = new Quantity { Value = 45, Unit = ObservationKind.PhysicalActivity.Unit }
+    };
+
+    public const string QuestionnaireUrl = "http://hl7.dk/fhir/hackathons/Questionnaire/MentalHealthQuestionnaire";
+    public const string MentalHealthCodeSystem = "http://hl7.dk/fhir/Hackathon-Sep-2022/CodeSystem/MentalHealthCodes";
+
+    /// <summary>
+    /// A cut-down mental health questionnaire: one group with two coded questions, which is enough to exercise
+    /// nesting, option lookup and partial answers.
+    /// </summary>
+    public static Questionnaire TelemedicineQuestionnaire(string url = QuestionnaireUrl) => new()
+    {
+        Meta = new Meta { Profile = [Telemedicine.Profiles.TelemedicineQuestionnaire] },
+        Url = url,
+        Title = "Mental health questionnaire",
+        Status = "active",
+        Item =
+        [
+            new QuestionnaireItem
+            {
+                LinkId = "1",
+                Text = "Fællesskab",
+                Type = "group",
+                Item =
+                [
+                    new QuestionnaireItem
+                    {
+                        LinkId = "1.1",
+                        Text = "Venskaber",
+                        Type = "choice",
+                        AnswerOption =
+                        [
+                            AnswerOption("60e95414-b97d-4197-af85-d5efc5628e86", "Jeg føler mig tæt på mine venner"),
+                            AnswerOption("48405c96-5f94-4ccf-b9ef-44579da052a8", "Jeg har nogle få venner"),
+                            AnswerOption("1a705260-cf44-4dd8-83fb-994baf656a6a", "Jeg føler mig alene")
+                        ]
+                    },
+                    new QuestionnaireItem
+                    {
+                        LinkId = "1.2",
+                        Text = "Kærlighed",
+                        Type = "choice",
+                        AnswerOption =
+                        [
+                            AnswerOption("a5341a86-677d-4d53-84a1-498dc1a4ed42", "Jeg føler mig elsket"),
+                            AnswerOption("b9453f69-31a2-4a67-a453-569d7cd9691a", "Jeg føler mig ikke elsket")
+                        ]
+                    }
+                ]
+            }
+        ]
+    };
+
+    private static QuestionnaireAnswerOption AnswerOption(string code, string display) => new()
+    {
+        ValueCoding = new Coding { System = MentalHealthCodeSystem, Code = code, Display = display }
     };
 
     public static QuestionnaireResponse TelemedicineQuestionnaireResponse(

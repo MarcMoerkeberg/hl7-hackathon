@@ -1,0 +1,101 @@
+@using Hl7Hackathon.Core.Models.Domain
+@inject IFhirExchangeFactory FhirExchangeFactory
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate Class="my-4" />
+        }
+        else if (_exchange is null)
+        {
+            <MudText Typo="Typo.body2">Nothing has been sent to the FHIR server yet.</MudText>
+        }
+        else
+        {
+            <MudStack Row AlignItems="AlignItems.Center" Spacing="2" Class="mb-3">
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">@_exchange.Method</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="ToStatusColor(_exchange.StatusCode)" Variant="Variant.Filled">
+                    @(_exchange.StatusCode?.ToString() ?? "no response")
+                </MudChip>
+                <MudText Typo="Typo.caption">@_exchange.ServerName</MudText>
+                <MudText Typo="Typo.caption">@_exchange.DurationMs ms</MudText>
+            </MudStack>
+
+            <MudText Typo="Typo.subtitle2" Class="mb-1">URL</MudText>
+            <MudPaper Outlined Class="pa-2 mb-3">
+                <MudText Typo="Typo.body2" Style="@UrlStyle">@_exchange.Url</MudText>
+            </MudPaper>
+
+            @if (_exchange.Error is { } error)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">@error</MudAlert>
+            }
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Request body</MudText>
+                    <MudPaper Outlined Class="pa-2" Style="@BodyStyle">
+                        <pre style="@BodyTextStyle">@(_exchange.RequestBody ?? EmptyBody)</pre>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Response body</MudText>
+                    <MudPaper Outlined Class="pa-2" Style="@BodyStyle">
+                        <pre style="@BodyTextStyle">@(_exchange.ResponseBody ?? EmptyBody)</pre>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string EmptyBody = "(no body)";
+
+    // Each body scrolls on its own, so a long exchange does not make the whole dialog scroll.
+    private const string BodyStyle = "max-height: 45vh; overflow: auto";
+    private const string BodyTextStyle = "margin: 0; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word";
+    private const string UrlStyle = "font-family: monospace; word-break: break-all";
+
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private FhirExchangeModel? _exchange;
+    private bool _loading;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static Color ToStatusColor(int? statusCode) => statusCode switch
+    {
+        >= 200 and < 300 => Color.Success,
+        >= 400 => Color.Error,
+        null => Color.Default,
+        _ => Color.Warning
+    };
+
+    private void Close() => MudDialog.Close();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _exchange = await GetLastExchangeAsync();
+        _loading = false;
+    }
+
+    private async Task<FhirExchangeModel?> GetLastExchangeAsync()
+    {
+        var recent = await FhirExchangeFactory.GetRecentFhirExchangesAsync(1);
+        if (recent.IsFailure || recent.Value.Count == 0)
+        {
+            return null;
+        }
+
+        var exchange = await FhirExchangeFactory.GetFhirExchangeByIdAsync(recent.Value[0].Id);
+
+        return exchange.IsSuccess ? exchange.Value : null;
+    }
+}

@@ -1,0 +1,353 @@
+@using Hl7Hackathon.Core.Models.Domain
+@using Hl7Hackathon.Web.Common
+@inject IQuestionnaireFactory QuestionnaireFactory
+@inject IEpisodeOfCareFactory EpisodeOfCareFactory
+@inject IPatientFactory PatientFactory
+
+@if (_patientsResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error">@_patientsResult.Error.Message</MudAlert>
+}
+else
+{
+    <MudGrid>
+        <MudItem xs="12">
+            <MudAutocomplete T="PatientModel"
+                             Value="_patient"
+                             ValueChanged="PatientChangedAsync"
+                             SearchFunc="SearchPatientsAsync"
+                             ToStringFunc="ToPatientName"
+                             Label="Patient"
+                             Placeholder="Name or CPR number"
+                             Variant="Variant.Outlined"
+                             Disabled="_patientsResult is null"
+                             Required
+                             Clearable
+                             OpenOnFocus
+                             ResetValueOnEmptyText
+                             MaxItems="null" />
+        </MudItem>
+
+        @* Every state of the episode lookup goes in the helper slot, so the dialog never changes height. *@
+        <MudItem xs="12">
+            <MudSelect T="EpisodeOfCareModel"
+                       Value="_episodeOfCare"
+                       ValueChanged="EpisodeOfCareChangedAsync"
+                       Label="Medicinsk forløb"
+                       Variant="Variant.Outlined"
+                       Disabled="_patient is null || _loadingEpisodes"
+                       Required
+                       Error="EpisodeOfCareError is not null"
+                       ErrorText="@EpisodeOfCareError"
+                       ToStringFunc="ToEpisodeOfCareName"
+                       HelperText="@EpisodeOfCareHelperText">
+                @foreach (var episodeOfCare in EpisodesOfCare)
+                {
+                    <MudSelectItem T="EpisodeOfCareModel" Value="@episodeOfCare">@ToEpisodeOfCareName(episodeOfCare)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <MudSelect T="QuestionnaireModel"
+                       Value="_questionnaire"
+                       ValueChanged="QuestionnaireChangedAsync"
+                       Label="Spørgeskema"
+                       Variant="Variant.Outlined"
+                       Required
+                       Error="QuestionnaireError is not null"
+                       ErrorText="@QuestionnaireError"
+                       ToStringFunc="ToQuestionnaireName">
+                @foreach (var questionnaire in Questionnaires)
+                {
+                    <MudSelectItem T="QuestionnaireModel" Value="@questionnaire">@ToQuestionnaireName(questionnaire)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudDatePicker Date="_authored"
+                           DateChanged="AuthoredChangedAsync"
+                           DateFormat="@DisplayFormat.DatePattern"
+                           Label="Answered on"
+                           Variant="Variant.Outlined"
+                           Required />
+        </MudItem>
+
+        @if (_questionnaire is { } questions)
+        {
+            <MudItem xs="12">
+                <MudDivider Class="my-2" />
+            </MudItem>
+
+            @foreach (var item in questions.Items)
+            {
+                @RenderItem(item)
+            }
+        }
+    </MudGrid>
+}
+
+@if (_createResult is { IsFailure: true })
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4" Style="white-space: pre-line">@_createResult.Error.Message</MudAlert>
+}
+
+@code {
+    /// <summary>Raised with the created response; the host decides what to show or close.</summary>
+    [Parameter]
+    public EventCallback<QuestionnaireResponseModel> OnCreated { get; set; }
+
+    /// <summary>
+    /// Raised whenever <see cref="CanCreate"/> changes, so a host that owns the submit button can re-render it.
+    /// </summary>
+    [Parameter]
+    public EventCallback<bool> CanCreateChanged { get; set; }
+
+    private readonly Dictionary<string, string> _answers = new(StringComparer.Ordinal);
+
+    private Result<IReadOnlyList<PatientModel>>? _patientsResult;
+    private Result<IReadOnlyList<QuestionnaireModel>>? _questionnairesResult;
+    private Result<IReadOnlyList<EpisodeOfCareModel>>? _episodesResult;
+    private Result<QuestionnaireResponseModel>? _createResult;
+    private PatientModel? _patient;
+    private EpisodeOfCareModel? _episodeOfCare;
+    private QuestionnaireModel? _questionnaire;
+    private DateTime? _authored = DateTime.Today;
+    private DateTime _defaultAuthored = DateTime.Today;
+    private bool _loadingEpisodes;
+
+    /// <summary>Whether the form holds everything a questionnaire response needs.</summary>
+    public bool CanCreate => _episodeOfCare is not null
+        && _questionnaire?.Url is not null
+        && _authored is not null
+        && _answers.Count > 0;
+
+    /// <summary>Whether the user has entered anything they would lose by closing the form.</summary>
+    public bool IsDirty => _patient is not null
+        || _episodeOfCare is not null
+        || _answers.Count > 0
+        || _authored != _defaultAuthored;
+
+    private IReadOnlyList<EpisodeOfCareModel> EpisodesOfCare =>
+        _episodesResult is { IsSuccess: true } ? _episodesResult.Value : [];
+
+    private IReadOnlyList<QuestionnaireModel> Questionnaires =>
+        _questionnairesResult is { IsSuccess: true } ? _questionnairesResult.Value : [];
+
+    private string EpisodeOfCareHelperText => _loadingEpisodes
+        ? "Looking up the patient's forløb…"
+        : _patient is null
+        ? "Select a patient first"
+        : "The forløb this questionnaire belongs to";
+
+    private string? EpisodeOfCareError
+    {
+        get
+        {
+            if (_episodesResult is { IsFailure: true })
+            {
+                return _episodesResult.Error.Message;
+            }
+
+            return _patient is not null && _episodesResult is { IsSuccess: true } && _episodesResult.Value.Count == 0
+                ? "No medicinsk forløb on the server yet — create one first"
+                : null;
+        }
+    }
+
+    private string? QuestionnaireError
+    {
+        get
+        {
+            if (_questionnairesResult is { IsFailure: true })
+            {
+                return _questionnairesResult.Error.Message;
+            }
+
+            // A response points at the canonical URL, so one without a url cannot be answered.
+            return _questionnairesResult is { IsSuccess: true } && Questionnaires.Count == 0
+                ? "The server publishes no questionnaire to answer"
+                : null;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Captured so a form left open past midnight does not count its own default as a change.
+        _defaultAuthored = DateTime.Today;
+        _authored = _defaultAuthored;
+
+        _patientsResult = await PatientFactory.GetPatientsAsync();
+        _questionnairesResult = await QuestionnaireFactory.GetQuestionnairesAsync();
+
+        // Nothing to choose when the server publishes exactly one.
+        if (_questionnairesResult is { IsSuccess: true } && Questionnaires is [{ Url: not null } only])
+        {
+            _questionnaire = only;
+        }
+    }
+
+    /// <summary>
+    /// Sends the answers. Does nothing unless <see cref="CanCreate"/>.
+    /// </summary>
+    public async Task SubmitAsync()
+    {
+        if (_episodeOfCare is null || _questionnaire?.Url is not { } url || _authored is null)
+        {
+            return;
+        }
+
+        await CanCreateChanged.InvokeAsync(false);
+
+        _createResult = await QuestionnaireFactory.CreateQuestionnaireResponseAsync(new CreateQuestionnaireResponseModel
+        {
+            EpisodeOfCareId = _episodeOfCare.Id,
+            QuestionnaireUrl = url,
+            Authored = ToStartOfDay(_authored.Value),
+            Answers = _answers
+                .Select(answer => new QuestionnaireAnswerModel { LinkId = answer.Key, Code = answer.Value })
+                .ToList()
+        });
+
+        await CanCreateChanged.InvokeAsync(CanCreate);
+
+        if (_createResult is { IsSuccess: true })
+        {
+            await OnCreated.InvokeAsync(_createResult.Value);
+        }
+    }
+
+    // Groups nest, so the questionnaire's own tree is walked rather than assumed to be two levels deep.
+    private RenderFragment RenderItem(QuestionnaireItemModel item) =>@<text>
+        @if (item.IsGroup)
+        {
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle2">@item.Text</MudText>
+            </MudItem>
+            @foreach (var nested in item.Items)
+            {
+                @RenderItem(nested)
+            }
+        }
+        else if (item.Options.Count > 0)
+        {
+            <MudItem xs="12">
+                <MudSelect T="string"
+                           Value="@_answers.GetValueOrDefault(item.LinkId)"
+                           ValueChanged="@(code => AnswerChangedAsync(item.LinkId, code))"
+                           ToStringFunc="@(code => ToAnswerName(item, code))"
+                           Label="@item.Text"
+                           Variant="Variant.Outlined"
+                           Clearable>
+                    @foreach (var option in item.Options)
+                    {
+                        <MudSelectItem T="string" Value="@option.Code">@(option.Display ?? option.Code)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        }
+        else
+        {
+            <MudItem xs="12">
+                <MudText Typo="Typo.body2">@item.Text</MudText>
+            </MudItem>
+        }
+    </text>;
+
+    private static string ToAnswerName(QuestionnaireItemModel item, string? code)
+    {
+        return item.Options.FirstOrDefault(option => option.Code == code)?.Display ?? code ?? string.Empty;
+    }
+
+    private Task<IEnumerable<PatientModel>> SearchPatientsAsync(string? value, CancellationToken cancellationToken)
+    {
+        var patients = _patientsResult is { IsSuccess: true } ? _patientsResult.Value : [];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Task.FromResult<IEnumerable<PatientModel>>(patients);
+        }
+
+        var matches = patients
+            .Where(patient => ToPatientName(patient).Contains(value.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Task.FromResult<IEnumerable<PatientModel>>(matches);
+    }
+
+    private static string ToPatientName(PatientModel? patient)
+    {
+        return patient is null
+            ? string.Empty
+            : $"{patient.GivenName} {patient.FamilyName} ({DisplayFormat.Cpr(patient.Cpr)})";
+    }
+
+    private static string ToEpisodeOfCareName(EpisodeOfCareModel? episodeOfCare)
+    {
+        return episodeOfCare is null
+            ? string.Empty
+            : $"{episodeOfCare.Id} · {episodeOfCare.Status} · from {DisplayFormat.FhirDateTime(episodeOfCare.Start)}";
+    }
+
+    private static string ToQuestionnaireName(QuestionnaireModel? questionnaire)
+    {
+        return questionnaire is null
+            ? string.Empty
+            : questionnaire.Title ?? questionnaire.Url ?? questionnaire.Id;
+    }
+
+    private async Task PatientChangedAsync(PatientModel? patient)
+    {
+        _patient = patient;
+        _episodeOfCare = null;
+        _episodesResult = null;
+
+        if (patient is not null)
+        {
+            _loadingEpisodes = true;
+            await CanCreateChanged.InvokeAsync(CanCreate);
+
+            _episodesResult = await EpisodeOfCareFactory.GetEpisodesOfCareForPatientAsync(patient.Id);
+            _loadingEpisodes = false;
+        }
+
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task EpisodeOfCareChangedAsync(EpisodeOfCareModel? episodeOfCare)
+    {
+        _episodeOfCare = episodeOfCare;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task QuestionnaireChangedAsync(QuestionnaireModel? questionnaire)
+    {
+        _questionnaire = questionnaire;
+
+        // The answers belong to the questionnaire that was open, so they do not carry over.
+        _answers.Clear();
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task AuthoredChangedAsync(DateTime? authored)
+    {
+        _authored = authored;
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    private async Task AnswerChangedAsync(string linkId, string? code)
+    {
+        if (code is null)
+        {
+            _answers.Remove(linkId);
+        }
+        else
+        {
+            _answers[linkId] = code;
+        }
+
+        await CanCreateChanged.InvokeAsync(CanCreate);
+    }
+
+    // The picker has no time zone, so the date is read as Danish local time and sent with that offset.
+    private static DateTimeOffset ToStartOfDay(DateTime date) => new(date.Date, TimeZoneInfo.Local.GetUtcOffset(date));
+}

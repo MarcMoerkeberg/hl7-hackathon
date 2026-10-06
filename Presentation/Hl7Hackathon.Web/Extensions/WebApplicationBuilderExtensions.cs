@@ -147,9 +147,12 @@ public static class WebApplicationBuilderExtensions
     public static void AddDependencyInjection(this IServiceCollection services)
     {
         //Factories
+        services.AddScoped<IEpisodeOfCareFactory, EpisodeOfCareFactory>();
         services.AddScoped<IFhirExchangeFactory, FhirExchangeFactory>();
         services.AddScoped<IFhirServerFactory, FhirServerFactory>();
+        services.AddScoped<IObservationFactory, ObservationFactory>();
         services.AddScoped<IPatientFactory, PatientFactory>();
+        services.AddScoped<IQuestionnaireFactory, QuestionnaireFactory>();
 
         //Services (IFhirService is registered as a typed client in AddFhirHttpClient)
         services.AddScoped<IFhirExchangeService, FhirExchangeService>();
